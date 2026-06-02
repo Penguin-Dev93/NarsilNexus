@@ -26,13 +26,24 @@ NarsilNexus is planned as a C#/.NET 8 WPF application for repeatable network tes
 
 ## Status
 
-This repository is in early planning and documentation setup. The application has not been scaffolded yet.
+This repository is in early implementation. The initial .NET 8 WPF solution scaffold is in place, including core models, app data path handling, bundled-tool packaging structure, and a starter diagnostic workspace UI.
 
 ## Platform
 
 - Windows desktop
 - C# / .NET 8
 - WPF
+
+## Build
+
+Open `NarsilNexus.sln` in Visual Studio on Windows, or build from the command line:
+
+```powershell
+dotnet restore .\NarsilNexus.sln
+dotnet build .\NarsilNexus.sln
+```
+
+The planned release package is a self-contained Windows build so target devices do not need a preinstalled .NET runtime.
 
 ## License
 

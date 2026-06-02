@@ -1,0 +1,8 @@
+{
+  "downloadMbps": 420.5,
+  "uploadMbps": 82.7,
+  "latencyMs": 13,
+  "jitterMs": 2.1,
+  "server": "Sample Speedtest",
+  "timestamp": "2026-06-01T21:30:00Z"
+}

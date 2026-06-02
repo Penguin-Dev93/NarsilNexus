@@ -1,0 +1,8 @@
+iperf3 Windows binary not bundled yet.
+
+Required before release:
+- Source repository or build pipeline
+- Version or commit
+- SHA-256 checksum
+- Build notes
+

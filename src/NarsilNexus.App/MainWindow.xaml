@@ -1,0 +1,321 @@
+<Window x:Class="NarsilNexus.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:NarsilNexus.App.ViewModels"
+        mc:Ignorable="d"
+        Title="NarsilNexus"
+        Icon="Assets/AppIcon.ico"
+        MinWidth="1080"
+        MinHeight="720"
+        Width="1180"
+        Height="760"
+        WindowStyle="SingleBorderWindow"
+        ResizeMode="CanResize"
+        Background="{DynamicResource AppBackgroundBrush}">
+    <Window.DataContext>
+        <vm:MainWindowViewModel />
+    </Window.DataContext>
+
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <DockPanel Margin="0,0,0,18">
+            <StackPanel DockPanel.Dock="Left">
+                <TextBlock Text="NarsilNexus"
+                           Foreground="{DynamicResource AccentPrimaryBrush}"
+                           FontSize="20"
+                           FontWeight="SemiBold" />
+                <TextBlock Text="Network diagnostics workspace"
+                           Foreground="{DynamicResource TextSecondaryBrush}"
+                           FontSize="12" />
+            </StackPanel>
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Text="{Binding AppDataPath}"
+                           Foreground="{DynamicResource TextSecondaryBrush}"
+                           FontSize="11"
+                           VerticalAlignment="Center"
+                           Margin="0,0,10,0" />
+                <Button Content="{Binding ThemeButtonText}"
+                        Command="{Binding ToggleThemeCommand}"
+                        Style="{DynamicResource SecondaryButtonStyle}" />
+            </StackPanel>
+        </DockPanel>
+
+        <Border Grid.Row="1" Style="{DynamicResource PanelCardStyle}" Margin="0,0,0,16">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="260" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="240" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel>
+                    <TextBlock Text="Saved Target" Style="{DynamicResource FieldLabelStyle}" />
+                    <ComboBox SelectedItem="{Binding SelectedTarget}"
+                              ItemsSource="{Binding SavedTargets}"
+                              DisplayMemberPath="DisplayName"
+                              MinHeight="38"
+                              Padding="10,6" />
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" Margin="12,0,0,0">
+                    <TextBlock Text="Target" Style="{DynamicResource FieldLabelStyle}" />
+                    <TextBox Text="{Binding TargetInput, UpdateSourceTrigger=PropertyChanged}"
+                              MinHeight="38"
+                              Padding="10,6"
+                              Foreground="{DynamicResource TextPrimaryBrush}"
+                              Background="{DynamicResource InputBackgroundBrush}"
+                              BorderBrush="{DynamicResource BorderBrush}" />
+                </StackPanel>
+
+                <StackPanel Grid.Column="2" Margin="12,0,0,0">
+                    <TextBlock Text="Target Name" Style="{DynamicResource FieldLabelStyle}" />
+                    <TextBox Text="{Binding TargetName, UpdateSourceTrigger=PropertyChanged}"
+                             MinHeight="38"
+                             Padding="10,6"
+                             Foreground="{DynamicResource TextPrimaryBrush}"
+                             Background="{DynamicResource InputBackgroundBrush}"
+                             BorderBrush="{DynamicResource BorderBrush}" />
+                </StackPanel>
+
+                <Button Grid.Column="3"
+                        Content="Save Target"
+                        Command="{Binding SaveTargetCommand}"
+                        Style="{DynamicResource SecondaryButtonStyle}"
+                        Margin="12,18,0,0" />
+                <Button Grid.Column="4"
+                        Content="{Binding RunButtonText}"
+                        Command="{Binding ToggleRunCommand}"
+                        Style="{DynamicResource PrimaryButtonStyle}"
+                        Margin="8,18,0,0" />
+
+                <Grid Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="5" Margin="0,14,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="170" />
+                        <ColumnDefinition Width="260" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="240" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <StackPanel>
+                        <TextBlock Text="Speed Type" Style="{DynamicResource FieldLabelStyle}" />
+                        <ComboBox SelectedItem="{Binding SpeedEndpointType}"
+                                  ItemsSource="{Binding SpeedEndpointTypes}"
+                                  MinHeight="38"
+                                  Padding="10,6" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1" Margin="12,0,0,0">
+                        <TextBlock Text="Saved Speed Endpoint" Style="{DynamicResource FieldLabelStyle}" />
+                        <ComboBox SelectedItem="{Binding SelectedSpeedEndpoint}"
+                                  ItemsSource="{Binding SavedSpeedEndpoints}"
+                                  DisplayMemberPath="DisplayName"
+                                  MinHeight="38"
+                                  Padding="10,6" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="2" Margin="12,0,0,0">
+                        <TextBlock Text="Speed URL / Base URL" Style="{DynamicResource FieldLabelStyle}" />
+                        <TextBox Text="{Binding SpeedResultsApiUrl, UpdateSourceTrigger=PropertyChanged}"
+                                 MinHeight="38"
+                                 Padding="10,6"
+                                 Foreground="{DynamicResource TextPrimaryBrush}"
+                                 Background="{DynamicResource InputBackgroundBrush}"
+                                 BorderBrush="{DynamicResource BorderBrush}" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="3" Margin="12,0,0,0">
+                        <TextBlock Text="Endpoint Name" Style="{DynamicResource FieldLabelStyle}" />
+                        <TextBox Text="{Binding SpeedEndpointName, UpdateSourceTrigger=PropertyChanged}"
+                                 MinHeight="38"
+                                 Padding="10,6"
+                                 Foreground="{DynamicResource TextPrimaryBrush}"
+                                 Background="{DynamicResource InputBackgroundBrush}"
+                                 BorderBrush="{DynamicResource BorderBrush}" />
+                    </StackPanel>
+
+                    <Button Grid.Column="4"
+                            Content="Save Endpoint"
+                            Command="{Binding SaveSpeedEndpointCommand}"
+                            Style="{DynamicResource SecondaryButtonStyle}"
+                            Margin="12,18,0,0" />
+
+                    <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,12,0,0">
+                        <TextBlock Text="Duration Sec" Style="{DynamicResource FieldLabelStyle}" />
+                        <TextBox Text="{Binding SpeedTestDurationSeconds, UpdateSourceTrigger=PropertyChanged}"
+                                 MinHeight="38"
+                                 Padding="10,6"
+                                 Foreground="{DynamicResource TextPrimaryBrush}"
+                                 Background="{DynamicResource InputBackgroundBrush}"
+                                 BorderBrush="{DynamicResource BorderBrush}" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Row="1" Grid.Column="1" Margin="12,12,0,0">
+                        <TextBlock Text="Ping Samples" Style="{DynamicResource FieldLabelStyle}" />
+                        <TextBox Text="{Binding SpeedPingSamples, UpdateSourceTrigger=PropertyChanged}"
+                                 MinHeight="38"
+                                 Padding="10,6"
+                                 Foreground="{DynamicResource TextPrimaryBrush}"
+                                 Background="{DynamicResource InputBackgroundBrush}"
+                                 BorderBrush="{DynamicResource BorderBrush}" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Row="1" Grid.Column="2" Grid.ColumnSpan="2" Margin="12,12,0,0">
+                        <TextBlock Text="Upload URL (optional)" Style="{DynamicResource FieldLabelStyle}" />
+                        <TextBox Text="{Binding SpeedProbeUploadUrl, UpdateSourceTrigger=PropertyChanged}"
+                                 MinHeight="38"
+                                 Padding="10,6"
+                                 Foreground="{DynamicResource TextPrimaryBrush}"
+                                 Background="{DynamicResource InputBackgroundBrush}"
+                                 BorderBrush="{DynamicResource BorderBrush}" />
+                    </StackPanel>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="300" />
+                <ColumnDefinition Width="16" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" Style="{DynamicResource PanelCardStyle}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="Diagnostic Tools" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                        <TextBlock Text="Select the checks to run against the current target."
+                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                   FontSize="12"
+                                   TextWrapping="Wrap"
+                                   Margin="0,4,0,14" />
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                            <Button Content="Select All"
+                                    Command="{Binding SelectAllToolsCommand}"
+                                    Style="{DynamicResource SecondaryButtonStyle}" />
+                            <Button Content="Deselect All"
+                                    Command="{Binding DeselectAllToolsCommand}"
+                                    Style="{DynamicResource SecondaryButtonStyle}"
+                                    Margin="8,0,0,0" />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl ItemsSource="{Binding Tools}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <CheckBox Content="{Binding Name}"
+                                              IsChecked="{Binding IsSelected}"
+                                              Margin="0,0,0,10"
+                                              Foreground="{DynamicResource TextPrimaryBrush}" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+
+            <Border Grid.Column="2" Style="{DynamicResource PanelCardStyle}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <DockPanel Margin="0,0,0,12">
+                        <StackPanel DockPanel.Dock="Left">
+                            <TextBlock Text="Results" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                            <TextBlock Text="{Binding RunStatusText}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" />
+                        </StackPanel>
+                        <ProgressBar DockPanel.Dock="Right"
+                                     Width="180"
+                                     Height="8"
+                                     IsIndeterminate="{Binding IsRunning}"
+                                     Visibility="{Binding RunningVisibility}" />
+                    </DockPanel>
+
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl ItemsSource="{Binding Tools}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Style="{DynamicResource ResultRowStyle}">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="120" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="120" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="{Binding Status}"
+                                                       Foreground="{Binding StatusBrush}"
+                                                       FontWeight="SemiBold" />
+                                            <StackPanel Grid.Column="1">
+                                                <TextBlock Text="{Binding Name}" Foreground="{DynamicResource TextPrimaryBrush}" FontWeight="SemiBold" />
+                                                <TextBlock Text="{Binding Summary}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" TextWrapping="Wrap" />
+                                                <Expander Header="Details"
+                                                          Visibility="{Binding RawOutputVisibility}"
+                                                          Foreground="{DynamicResource TextSecondaryBrush}"
+                                                          Margin="0,8,0,0">
+                                                    <TextBox Text="{Binding RawOutput}"
+                                                             IsReadOnly="True"
+                                                             TextWrapping="NoWrap"
+                                                             AcceptsReturn="True"
+                                                             MaxHeight="220"
+                                                             HorizontalScrollBarVisibility="Auto"
+                                                             VerticalScrollBarVisibility="Auto"
+                                                             FontFamily="Consolas"
+                                                             FontSize="11"
+                                                             Foreground="{DynamicResource TextPrimaryBrush}"
+                                                             Background="{DynamicResource InputBackgroundBrush}"
+                                                             BorderBrush="{DynamicResource BorderBrush}" />
+                                                </Expander>
+                                            </StackPanel>
+                                            <ProgressBar Grid.Column="2"
+                                                         Height="6"
+                                                         IsIndeterminate="{Binding IsRunning}"
+                                                         Visibility="{Binding RunningVisibility}" />
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <DockPanel Grid.Row="3" Margin="0,16,0,0">
+            <Button Content="Import Config" Style="{DynamicResource SecondaryButtonStyle}" />
+            <Button Content="Export Config" Style="{DynamicResource SecondaryButtonStyle}" Margin="8,0,0,0" />
+            <Button Content="Generate PDF"
+                    Command="{Binding GeneratePdfCommand}"
+                    Style="{DynamicResource SecondaryButtonStyle}"
+                    Margin="8,0,0,0" />
+            <Button DockPanel.Dock="Right"
+                    Content="Open App Data Folder"
+                    Command="{Binding OpenAppDataFolderCommand}"
+                    Style="{DynamicResource SecondaryButtonStyle}" />
+        </DockPanel>
+    </Grid>
+</Window>
