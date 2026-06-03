@@ -11,22 +11,27 @@ A Windows desktop network diagnostics toolkit for IT/admin troubleshooting.
 
 ## Overview
 
-NarsilNexus is planned as a C#/.NET 8 WPF application for repeatable network testing. The goal is to give admins a clean workspace for selecting a saved target or typing an ad hoc domain, IP, hostname, or URL, then running structured diagnostics and producing ticket-ready reports.
+NarsilNexus is a C#/.NET 8 WPF application for repeatable network testing. It gives admins a clean workspace for selecting a saved target or typing an ad hoc domain, IP, hostname, or URL, then running structured diagnostics and producing ticket-ready reports.
 
-## Planned Capabilities
+## Current Capabilities
 
-- Saved targets for domains, IPs, and URLs.
+- Saved targets for domains, IPs, hostnames, and URLs.
 - Configuration import/export so teams can share known targets and defaults.
-- Native Test-NetConnection-style diagnostics.
+- Test-NetConnection-style diagnostics.
 - Ping, DNS lookup with custom resolver support, TCP port checks, HTTP/S checks, traceroute, RDAP lookup, and path MTU testing.
-- Bundled iperf3 client for basic TCP throughput testing.
-- Internal speed-test result reader from configured HTTP/S JSON endpoints.
-- Local JSON history.
-- Ticket-ready PDF reports.
+- Speed tests from configured JSON, HTTP probe, or LibreSpeed backend endpoints.
+- Saved speed-test endpoints with duration, ping sample, download, upload, and latency settings.
+- Local JSON run history.
+- Ticket-ready PDF reports from current results or saved history.
+- Modern dark/light WPF interface with workflow tabs.
+
+## Roadmap
+
+- v1.1.0: bundled iperf3 client workflow for basic TCP throughput testing.
 
 ## Status
 
-This repository is in early implementation. The initial .NET 8 WPF solution scaffold is in place, including core models, app data path handling, bundled-tool packaging structure, and a starter diagnostic workspace UI.
+v1.0.0 is the first release build. It is packaged as a portable, self-contained Windows executable.
 
 ## Platform
 
@@ -44,6 +49,14 @@ dotnet build .\NarsilNexus.sln
 ```
 
 The planned release package is a self-contained Windows build so target devices do not need a preinstalled .NET runtime.
+
+## Release Build
+
+Publish a portable Windows executable:
+
+```powershell
+dotnet publish .\src\NarsilNexus.App\NarsilNexus.App.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:IncludeAllContentForSelfExtract=true -p:EnableCompressionInSingleFile=true
+```
 
 ## License
 

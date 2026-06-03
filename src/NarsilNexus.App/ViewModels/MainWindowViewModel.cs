@@ -5,11 +5,13 @@ using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Input;
+using Microsoft.Win32;
 using NarsilNexus.App.Services;
 using NarsilNexus.Core.Diagnostics;
 using NarsilNexus.Core.Storage;
@@ -29,6 +31,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private CancellationTokenSource? _runCancellation;
     private string _targetName = string.Empty;
     private string _targetInput = string.Empty;
+    private string _dnsServerInput = string.Empty;
     private string _speedEndpointName = string.Empty;
     private string _speedEndpointType = "JSON Results API";
     private string _speedResultsApiUrl = string.Empty;
@@ -39,10 +42,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private int _speedPingSamples = 10;
     private SavedTargetOption? _selectedTarget;
     private SavedEndpointOption? _selectedSpeedEndpoint;
+    private HistoryRunViewModel? _selectedHistoryRun;
     private readonly NarsilPaths _paths;
     private readonly SimplePdfReportWriter _pdfReportWriter = new();
     private readonly SavedTargetStore _savedTargetStore;
     private readonly SavedEndpointStore _savedEndpointStore;
+    private readonly DiagnosticHistoryStore _historyStore;
 
     public MainWindowViewModel()
     {
@@ -50,10 +55,15 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         _paths.EnsureCreated();
         _savedTargetStore = new SavedTargetStore(_paths.ConfigDirectory);
         _savedEndpointStore = new SavedEndpointStore(_paths.ConfigDirectory);
+        _historyStore = new DiagnosticHistoryStore(_paths.HistoryDirectory);
         AppDataPath = _paths.AppDataRoot;
 
         SavedTargets = new ObservableCollection<SavedTargetOption>(_savedTargetStore.Load());
         SavedSpeedEndpoints = new ObservableCollection<SavedEndpointOption>(_savedEndpointStore.Load());
+        HistoryRuns = new ObservableCollection<HistoryRunViewModel>(
+            _historyStore.Load()
+                .OrderByDescending(entry => entry.StartedAt)
+                .Select(entry => new HistoryRunViewModel(entry)));
 
         Tools =
         [
@@ -68,21 +78,39 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             new ToolRunViewModel(DiagnosticToolId.Iperf3, "iperf3"),
             new ToolRunViewModel(DiagnosticToolId.SpeedTestResults, "Speed Results")
         ];
+        TargetDiagnosticTools = Tools
+            .Where(tool => tool.Id is not DiagnosticToolId.SpeedTestResults and not DiagnosticToolId.Iperf3)
+            .ToList();
+        SpeedTestTool = Tools.First(tool => tool.Id == DiagnosticToolId.SpeedTestResults);
+        IperfTool = Tools.First(tool => tool.Id == DiagnosticToolId.Iperf3);
 
         ToggleRunCommand = new AsyncRelayCommand(ToggleRunAsync);
+        RunTargetDiagnosticsCommand = new AsyncRelayCommand(RunTargetDiagnosticsAsync);
+        RunSpeedTestCommand = new AsyncRelayCommand(RunSpeedTestOnlyAsync);
+        RunIperfCommand = new AsyncRelayCommand(RunIperfOnlyAsync);
         SaveTargetCommand = new RelayCommand(_ => SaveTarget());
+        DeleteTargetCommand = new RelayCommand(_ => DeleteSelectedTarget());
         SaveSpeedEndpointCommand = new RelayCommand(_ => SaveSpeedEndpoint());
+        DeleteSpeedEndpointCommand = new RelayCommand(_ => DeleteSelectedSpeedEndpoint());
         SelectAllToolsCommand = new RelayCommand(_ => SetToolSelection(true));
         DeselectAllToolsCommand = new RelayCommand(_ => SetToolSelection(false));
+        SelectAllDiagnosticToolsCommand = new RelayCommand(_ => SetToolSelection(TargetDiagnosticTools, true));
+        DeselectAllDiagnosticToolsCommand = new RelayCommand(_ => SetToolSelection(TargetDiagnosticTools, false));
         GeneratePdfCommand = new RelayCommand(_ => GeneratePdf());
         OpenAppDataFolderCommand = new RelayCommand(_ => OpenAppDataFolder());
         ToggleThemeCommand = new RelayCommand(_ => ToggleTheme());
+        ImportConfigCommand = new RelayCommand(_ => ImportConfig());
+        ExportConfigCommand = new RelayCommand(_ => ExportConfig());
+        LoadHistoryRunCommand = new RelayCommand(_ => LoadSelectedHistoryRun());
+        GenerateHistoryPdfCommand = new RelayCommand(_ => GenerateSelectedHistoryPdf());
+        OpenHistoryPdfCommand = new RelayCommand(_ => OpenSelectedHistoryPdf());
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
     public ObservableCollection<SavedTargetOption> SavedTargets { get; }
     public ObservableCollection<SavedEndpointOption> SavedSpeedEndpoints { get; }
+    public ObservableCollection<HistoryRunViewModel> HistoryRuns { get; }
     public IReadOnlyList<string> SpeedEndpointTypes { get; } =
     [
         "JSON Results API",
@@ -90,14 +118,29 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         "HTTP Probe"
     ];
     public ObservableCollection<ToolRunViewModel> Tools { get; }
+    public IReadOnlyList<ToolRunViewModel> TargetDiagnosticTools { get; }
+    public ToolRunViewModel SpeedTestTool { get; }
+    public ToolRunViewModel IperfTool { get; }
     public ICommand ToggleRunCommand { get; }
+    public ICommand RunTargetDiagnosticsCommand { get; }
+    public ICommand RunSpeedTestCommand { get; }
+    public ICommand RunIperfCommand { get; }
     public ICommand SaveTargetCommand { get; }
+    public ICommand DeleteTargetCommand { get; }
     public ICommand SaveSpeedEndpointCommand { get; }
+    public ICommand DeleteSpeedEndpointCommand { get; }
     public ICommand SelectAllToolsCommand { get; }
     public ICommand DeselectAllToolsCommand { get; }
+    public ICommand SelectAllDiagnosticToolsCommand { get; }
+    public ICommand DeselectAllDiagnosticToolsCommand { get; }
     public ICommand GeneratePdfCommand { get; }
     public ICommand OpenAppDataFolderCommand { get; }
     public ICommand ToggleThemeCommand { get; }
+    public ICommand ImportConfigCommand { get; }
+    public ICommand ExportConfigCommand { get; }
+    public ICommand LoadHistoryRunCommand { get; }
+    public ICommand GenerateHistoryPdfCommand { get; }
+    public ICommand OpenHistoryPdfCommand { get; }
     public string AppDataPath { get; }
 
     public string TargetInput
@@ -110,6 +153,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         get => _targetName;
         set => SetField(ref _targetName, value);
+    }
+
+    public string DnsServerInput
+    {
+        get => _dnsServerInput;
+        set => SetField(ref _dnsServerInput, value);
     }
 
     public string SpeedResultsApiUrl
@@ -129,7 +178,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                     string.IsNullOrWhiteSpace(SpeedProbeDownloadUrl) &&
                     string.IsNullOrWhiteSpace(SpeedResultsApiUrl) is false)
                 {
-                    ApplyLibreSpeedBaseUrl(SpeedResultsApiUrl);
+                    ApplyLibreSpeedBaseUrl(SpeedResultsApiUrl, overwriteExisting: false);
                 }
             }
         }
@@ -179,6 +228,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             if (SetField(ref _selectedTarget, value) && value is not null)
             {
                 TargetInput = value.Target;
+                TargetName = value.Name;
             }
         }
     }
@@ -191,8 +241,21 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             if (SetField(ref _selectedSpeedEndpoint, value) && value is not null)
             {
                 SpeedResultsApiUrl = value.Url;
+                SpeedEndpointType = string.IsNullOrWhiteSpace(value.EndpointType) ? "JSON Results API" : value.EndpointType;
+                SpeedProbePingUrl = value.PingUrl;
+                SpeedProbeDownloadUrl = value.DownloadUrl;
+                SpeedProbeUploadUrl = value.UploadUrl;
+                SpeedTestDurationSeconds = value.DurationSeconds;
+                SpeedPingSamples = value.PingSamples;
+                SpeedEndpointName = value.Name;
             }
         }
+    }
+
+    public HistoryRunViewModel? SelectedHistoryRun
+    {
+        get => _selectedHistoryRun;
+        set => SetField(ref _selectedHistoryRun, value);
     }
 
     public bool IsRunning
@@ -212,6 +275,19 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public string RunButtonText => IsRunning ? "Cancel" : "Run";
     public string RunStatusText => IsRunning ? "Diagnostics are running..." : "Select tools and run diagnostics.";
     public Visibility RunningVisibility => IsRunning ? Visibility.Visible : Visibility.Collapsed;
+    public bool IsDarkMode
+    {
+        get => _isDarkMode;
+        set
+        {
+            if (SetField(ref _isDarkMode, value))
+            {
+                ApplyTheme();
+                OnPropertyChanged(nameof(ThemeButtonText));
+            }
+        }
+    }
+
     public string ThemeButtonText => _isDarkMode ? "Light Mode" : "Dark Mode";
 
     private async Task ToggleRunAsync()
@@ -222,12 +298,44 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             return;
         }
 
-        await RunDiagnosticsAsync();
+        await RunDiagnosticsAsync(Tools.Where(tool => tool.IsSelected).ToList());
     }
 
-    private async Task RunDiagnosticsAsync()
+    private async Task RunTargetDiagnosticsAsync()
     {
-        var selectedTools = Tools.Where(tool => tool.IsSelected).ToList();
+        if (IsRunning)
+        {
+            _runCancellation?.Cancel();
+            return;
+        }
+
+        await RunDiagnosticsAsync(TargetDiagnosticTools.Where(tool => tool.IsSelected).ToList());
+    }
+
+    private async Task RunSpeedTestOnlyAsync()
+    {
+        if (IsRunning)
+        {
+            _runCancellation?.Cancel();
+            return;
+        }
+
+        await RunDiagnosticsAsync([SpeedTestTool]);
+    }
+
+    private async Task RunIperfOnlyAsync()
+    {
+        if (IsRunning)
+        {
+            _runCancellation?.Cancel();
+            return;
+        }
+
+        await RunDiagnosticsAsync([IperfTool]);
+    }
+
+    private async Task RunDiagnosticsAsync(IReadOnlyList<ToolRunViewModel> selectedTools)
+    {
         if (selectedTools.Count == 0)
         {
             SetAllSelected(DiagnosticStatus.Warning, "Select at least one diagnostic tool.");
@@ -250,6 +358,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
         _runCancellation = new CancellationTokenSource();
         IsRunning = true;
+        var startedAt = DateTimeOffset.Now;
 
         try
         {
@@ -264,6 +373,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
                 tool.Status = DiagnosticStatus.Running;
                 tool.Summary = "Working...";
+                tool.RawOutput = null;
 
                 switch (tool.Id)
                 {
@@ -274,7 +384,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                         await RunPingAsync(tool, target.Host!, _runCancellation.Token);
                         break;
                     case DiagnosticToolId.DnsLookup:
-                        await RunDnsLookupAsync(tool, target.Host!, _runCancellation.Token);
+                        await RunDnsLookupAsync(tool, target.Host!, DnsServerInput, _runCancellation.Token);
                         break;
                     case DiagnosticToolId.TcpPort:
                         await RunTcpPortAsync(tool, target.Host!, 443, _runCancellation.Token);
@@ -304,6 +414,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                         break;
                 }
             }
+
+            SaveHistoryRun(startedAt, targetInput, selectedTools);
         }
         finally
         {
@@ -327,12 +439,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         var existing = SavedTargets.FirstOrDefault(saved =>
             saved.Target.Equals(value, StringComparison.OrdinalIgnoreCase));
 
-        if (existing is not null)
-        {
-            TargetInput = existing.Target;
-            return;
-        }
-
         var name = target.TargetKind switch
         {
             _ when string.IsNullOrWhiteSpace(TargetName) is false => TargetName.Trim(),
@@ -341,14 +447,46 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             _ => value
         };
 
-        SavedTargets.Add(new SavedTargetOption(name, value));
+        var savedTarget = new SavedTargetOption(name, value);
+        if (existing is not null)
+        {
+            var index = SavedTargets.IndexOf(existing);
+            SavedTargets[index] = savedTarget;
+            SelectedTarget = savedTarget;
+        }
+        else
+        {
+            SavedTargets.Add(savedTarget);
+            SelectedTarget = savedTarget;
+        }
+
         _savedTargetStore.Save(SavedTargets);
+        TargetName = string.Empty;
+    }
+
+    private void DeleteSelectedTarget()
+    {
+        if (SelectedTarget is null)
+        {
+            SetAllSelected(DiagnosticStatus.Warning, "Select a saved target before deleting.");
+            return;
+        }
+
+        var selected = SelectedTarget;
+        SavedTargets.Remove(selected);
+        _savedTargetStore.Save(SavedTargets);
+        SelectedTarget = null;
         TargetName = string.Empty;
     }
 
     private void SetToolSelection(bool isSelected)
     {
-        foreach (var tool in Tools)
+        SetToolSelection(Tools, isSelected);
+    }
+
+    private static void SetToolSelection(IEnumerable<ToolRunViewModel> tools, bool isSelected)
+    {
+        foreach (var tool in tools)
         {
             tool.IsSelected = isSelected;
         }
@@ -365,17 +503,48 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             return;
         }
 
-        var existing = SavedSpeedEndpoints.FirstOrDefault(endpoint =>
-            endpoint.Url.Equals(value, StringComparison.OrdinalIgnoreCase));
+        var name = string.IsNullOrWhiteSpace(SpeedEndpointName) ? uri.Host : SpeedEndpointName.Trim();
+        var endpoint = new SavedEndpointOption(
+            name,
+            value,
+            SpeedEndpointType,
+            SpeedProbePingUrl.Trim(),
+            SpeedProbeDownloadUrl.Trim(),
+            SpeedProbeUploadUrl.Trim(),
+            SpeedTestDurationSeconds,
+            SpeedPingSamples);
+        var existing = SavedSpeedEndpoints.FirstOrDefault(saved =>
+            saved.Name.Equals(name, StringComparison.OrdinalIgnoreCase) ||
+            saved.Url.Equals(value, StringComparison.OrdinalIgnoreCase));
+
         if (existing is not null)
         {
-            SpeedResultsApiUrl = existing.Url;
+            var index = SavedSpeedEndpoints.IndexOf(existing);
+            SavedSpeedEndpoints[index] = endpoint;
+            SelectedSpeedEndpoint = endpoint;
+        }
+        else
+        {
+            SavedSpeedEndpoints.Add(endpoint);
+            SelectedSpeedEndpoint = endpoint;
+        }
+
+        _savedEndpointStore.Save(SavedSpeedEndpoints);
+        SpeedEndpointName = string.Empty;
+    }
+
+    private void DeleteSelectedSpeedEndpoint()
+    {
+        if (SelectedSpeedEndpoint is null)
+        {
+            SetToolStatus(DiagnosticToolId.SpeedTestResults, DiagnosticStatus.Warning, "Select a saved speed endpoint before deleting.");
             return;
         }
 
-        var name = string.IsNullOrWhiteSpace(SpeedEndpointName) ? uri.Host : SpeedEndpointName.Trim();
-        SavedSpeedEndpoints.Add(new SavedEndpointOption(name, value));
+        var selected = SelectedSpeedEndpoint;
+        SavedSpeedEndpoints.Remove(selected);
         _savedEndpointStore.Save(SavedSpeedEndpoints);
+        SelectedSpeedEndpoint = null;
         SpeedEndpointName = string.Empty;
     }
 
@@ -437,11 +606,21 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
     }
 
-    private static async Task RunDnsLookupAsync(ToolRunViewModel tool, string host, CancellationToken cancellationToken)
+    private static async Task RunDnsLookupAsync(ToolRunViewModel tool, string host, string dnsServer, CancellationToken cancellationToken)
     {
         try
         {
-            var addresses = await Dns.GetHostAddressesAsync(host, cancellationToken);
+            if (dnsServer.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                dnsServer.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            {
+                tool.Status = DiagnosticStatus.Fail;
+                tool.Summary = "DNS Server must be a resolver IP or host name, not an HTTP URL.";
+                return;
+            }
+
+            var addresses = string.IsNullOrWhiteSpace(dnsServer)
+                ? await Dns.GetHostAddressesAsync(host, cancellationToken)
+                : await ResolveWithDnsServerAsync(host, dnsServer, cancellationToken);
             if (addresses.Length == 0)
             {
                 tool.Status = DiagnosticStatus.Warning;
@@ -450,7 +629,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             }
 
             tool.Status = DiagnosticStatus.Pass;
-            tool.Summary = string.Join(", ", addresses.Select(address => address.ToString()));
+            tool.Summary = string.IsNullOrWhiteSpace(dnsServer)
+                ? string.Join(", ", addresses.Select(address => address.ToString()))
+                : $"{string.Join(", ", addresses.Select(address => address.ToString()))} via {dnsServer.Trim()}";
         }
         catch (OperationCanceledException)
         {
@@ -462,6 +643,150 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             tool.Status = DiagnosticStatus.Fail;
             tool.Summary = ex.Message;
         }
+    }
+
+    private static async Task<IPAddress[]> ResolveWithDnsServerAsync(string host, string dnsServer, CancellationToken cancellationToken)
+    {
+        var server = await ResolveDnsServerAddressAsync(dnsServer.Trim(), cancellationToken);
+        var addresses = new List<IPAddress>();
+        addresses.AddRange(await QueryDnsServerAsync(server, host, 1, cancellationToken));
+        addresses.AddRange(await QueryDnsServerAsync(server, host, 28, cancellationToken));
+        return addresses.Distinct().ToArray();
+    }
+
+    private static async Task<IPAddress> ResolveDnsServerAddressAsync(string dnsServer, CancellationToken cancellationToken)
+    {
+        if (IPAddress.TryParse(dnsServer, out var address))
+        {
+            return address;
+        }
+
+        var addresses = await Dns.GetHostAddressesAsync(dnsServer, cancellationToken);
+        return addresses.FirstOrDefault(address => address.AddressFamily is AddressFamily.InterNetwork or AddressFamily.InterNetworkV6)
+            ?? throw new InvalidOperationException($"Could not resolve DNS server {dnsServer}.");
+    }
+
+    private static async Task<IReadOnlyList<IPAddress>> QueryDnsServerAsync(
+        IPAddress server,
+        string host,
+        ushort queryType,
+        CancellationToken cancellationToken)
+    {
+        using var udp = new UdpClient(server.AddressFamily);
+        udp.Connect(server, 53);
+
+        var request = BuildDnsQuery(host, queryType);
+        await udp.SendAsync(request, cancellationToken);
+        var responseTask = udp.ReceiveAsync(cancellationToken).AsTask();
+        var completed = await Task.WhenAny(responseTask, Task.Delay(TimeSpan.FromSeconds(4), cancellationToken));
+        if (completed != responseTask)
+        {
+            throw new TimeoutException($"DNS server {server} did not respond.");
+        }
+
+        return ParseDnsResponse(responseTask.Result.Buffer, queryType);
+    }
+
+    private static byte[] BuildDnsQuery(string host, ushort queryType)
+    {
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream, Encoding.ASCII, leaveOpen: true);
+        var id = (ushort)Random.Shared.Next(ushort.MaxValue);
+
+        WriteUInt16BigEndian(writer, id);
+        WriteUInt16BigEndian(writer, 0x0100);
+        WriteUInt16BigEndian(writer, 1);
+        WriteUInt16BigEndian(writer, 0);
+        WriteUInt16BigEndian(writer, 0);
+        WriteUInt16BigEndian(writer, 0);
+
+        foreach (var label in host.TrimEnd('.').Split('.', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var bytes = Encoding.ASCII.GetBytes(label);
+            if (bytes.Length > 63)
+            {
+                throw new InvalidOperationException("DNS label is too long.");
+            }
+
+            writer.Write((byte)bytes.Length);
+            writer.Write(bytes);
+        }
+
+        writer.Write((byte)0);
+        WriteUInt16BigEndian(writer, queryType);
+        WriteUInt16BigEndian(writer, 1);
+        writer.Flush();
+        return stream.ToArray();
+    }
+
+    private static IReadOnlyList<IPAddress> ParseDnsResponse(byte[] response, ushort queryType)
+    {
+        if (response.Length < 12)
+        {
+            return [];
+        }
+
+        var answerCount = ReadUInt16BigEndian(response, 6);
+        var offset = 12;
+        SkipDnsName(response, ref offset);
+        offset += 4;
+
+        var addresses = new List<IPAddress>();
+        for (var i = 0; i < answerCount && offset + 12 <= response.Length; i++)
+        {
+            SkipDnsName(response, ref offset);
+            var type = ReadUInt16BigEndian(response, offset);
+            offset += 2;
+            offset += 2;
+            offset += 4;
+            var dataLength = ReadUInt16BigEndian(response, offset);
+            offset += 2;
+
+            if (offset + dataLength > response.Length)
+            {
+                break;
+            }
+
+            if (type == queryType && (dataLength == 4 || dataLength == 16))
+            {
+                addresses.Add(new IPAddress(response.Skip(offset).Take(dataLength).ToArray()));
+            }
+
+            offset += dataLength;
+        }
+
+        return addresses;
+    }
+
+    private static void SkipDnsName(byte[] response, ref int offset)
+    {
+        while (offset < response.Length)
+        {
+            var length = response[offset++];
+            if ((length & 0xC0) == 0xC0)
+            {
+                offset++;
+                return;
+            }
+
+            if (length == 0)
+            {
+                return;
+            }
+
+            offset += length;
+        }
+    }
+
+    private static ushort ReadUInt16BigEndian(byte[] bytes, int offset)
+    {
+        return (ushort)((bytes[offset] << 8) | bytes[offset + 1]);
+    }
+
+    private static void WriteUInt16BigEndian(BinaryWriter writer, int value)
+    {
+        writer.Write((byte)((value >> 8) & 0xFF));
+        writer.Write((byte)(value & 0xFF));
     }
 
     private static async Task RunTcpPortAsync(ToolRunViewModel tool, string host, int port, CancellationToken cancellationToken)
@@ -643,16 +968,17 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     private async Task RunSpeedResultsAsync(ToolRunViewModel tool, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(SpeedResultsApiUrl))
+        var validationError = ValidateSpeedEndpointForRun();
+        if (validationError is not null)
         {
-            tool.Status = DiagnosticStatus.Skipped;
-            tool.Summary = "Enter a Speed URL before running Speed Results.";
+            tool.Status = DiagnosticStatus.Fail;
+            tool.Summary = validationError;
             return;
         }
 
         if (SpeedEndpointType.Equals("LibreSpeed", StringComparison.OrdinalIgnoreCase))
         {
-            ApplyLibreSpeedBaseUrl(SpeedResultsApiUrl);
+            ApplyLibreSpeedBaseUrl(SpeedResultsApiUrl, overwriteExisting: false);
             await RunHttpSpeedProbeAsync(tool, cancellationToken);
             return;
         }
@@ -755,7 +1081,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         var uploadUrl = SpeedProbeUploadUrl.Trim();
 
         if (Uri.TryCreate(pingUrl.Trim(), UriKind.Absolute, out var pingUri) is false ||
-            Uri.TryCreate(downloadUrl.Trim(), UriKind.Absolute, out var downloadUri) is false)
+            IsHttpUri(pingUri) is false ||
+            Uri.TryCreate(downloadUrl.Trim(), UriKind.Absolute, out var downloadUri) is false ||
+            IsHttpUri(downloadUri) is false)
         {
             tool.Status = DiagnosticStatus.Fail;
             tool.Summary = "HTTP Probe requires valid ping and download URLs.";
@@ -782,7 +1110,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
             SpeedMeasurement? upload = null;
             if (string.IsNullOrWhiteSpace(uploadUrl) is false &&
-                Uri.TryCreate(uploadUrl, UriKind.Absolute, out var uploadUri))
+                Uri.TryCreate(uploadUrl, UriKind.Absolute, out var uploadUri) &&
+                IsHttpUri(uploadUri))
             {
                 upload = await RunTimedUploadAsync(uploadUri, TimeSpan.FromSeconds(SpeedTestDurationSeconds), cancellationToken);
             }
@@ -824,11 +1153,208 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         var effectiveTarget = GetEffectiveTargetInput();
         var target = string.IsNullOrWhiteSpace(effectiveTarget) ? "No target entered" : effectiveTarget.Trim();
         var reportPath = _pdfReportWriter.WriteReport(_paths.ReportsDirectory, target, Tools);
+        UpdateMostRecentHistoryPdf(reportPath);
         foreach (var tool in Tools.Where(tool => tool.Id == DiagnosticToolId.SpeedTestResults))
         {
             tool.Status = DiagnosticStatus.Pass;
             tool.Summary = $"Report saved: {reportPath}";
             break;
+        }
+    }
+
+    private void LoadSelectedHistoryRun()
+    {
+        if (SelectedHistoryRun is null)
+        {
+            SetAllSelected(DiagnosticStatus.Warning, "Select a history run before loading.");
+            return;
+        }
+
+        TargetInput = SelectedHistoryRun.Entry.Target;
+        DnsServerInput = SelectedHistoryRun.Entry.DnsServer;
+        SpeedEndpointType = string.IsNullOrWhiteSpace(SelectedHistoryRun.Entry.SpeedEndpointType)
+            ? SpeedEndpointTypes[0]
+            : SelectedHistoryRun.Entry.SpeedEndpointType;
+        SpeedResultsApiUrl = SelectedHistoryRun.Entry.SpeedEndpointUrl;
+        SpeedEndpointName = SelectedHistoryRun.Entry.SpeedEndpointName;
+
+        foreach (var tool in Tools)
+        {
+            var historyResult = SelectedHistoryRun.Entry.Results.FirstOrDefault(result => result.Id == tool.Id);
+            if (historyResult is null)
+            {
+                tool.Status = DiagnosticStatus.Pending;
+                tool.Summary = "Ready";
+                tool.RawOutput = null;
+                continue;
+            }
+
+            tool.Status = historyResult.Status;
+            tool.Summary = historyResult.Summary;
+            tool.RawOutput = historyResult.RawOutput;
+            tool.IsSelected = true;
+        }
+    }
+
+    private void GenerateSelectedHistoryPdf()
+    {
+        if (SelectedHistoryRun is null)
+        {
+            SetAllSelected(DiagnosticStatus.Warning, "Select a history run before generating a PDF.");
+            return;
+        }
+
+        var reportPath = _pdfReportWriter.WriteReport(_paths.ReportsDirectory, SelectedHistoryRun.Entry);
+        SelectedHistoryRun.UpdatePdfPath(reportPath);
+        SaveHistoryCollection();
+        SetToolStatus(DiagnosticToolId.SpeedTestResults, DiagnosticStatus.Pass, $"History report saved: {reportPath}");
+    }
+
+    private void OpenSelectedHistoryPdf()
+    {
+        if (SelectedHistoryRun is null)
+        {
+            SetAllSelected(DiagnosticStatus.Warning, "Select a history run before opening a PDF.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(SelectedHistoryRun.PdfPath) || File.Exists(SelectedHistoryRun.PdfPath) is false)
+        {
+            SetToolStatus(DiagnosticToolId.SpeedTestResults, DiagnosticStatus.Warning, "Selected history run does not have an available PDF yet.");
+            return;
+        }
+
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = SelectedHistoryRun.PdfPath,
+            UseShellExecute = true
+        });
+    }
+
+    private void SaveHistoryRun(DateTimeOffset startedAt, string targetInput, IReadOnlyList<ToolRunViewModel> selectedTools)
+    {
+        var targetName = SelectedTarget?.Name ?? string.Empty;
+        var entry = new DiagnosticHistoryEntry(
+            Guid.NewGuid(),
+            startedAt,
+            DateTimeOffset.Now,
+            string.IsNullOrWhiteSpace(targetInput) ? "No target entered" : targetInput.Trim(),
+            targetName,
+            DnsServerInput.Trim(),
+            SelectedSpeedEndpoint?.Name ?? SpeedEndpointName.Trim(),
+            SpeedEndpointType,
+            SpeedResultsApiUrl.Trim(),
+            string.Empty,
+            selectedTools
+                .Select(tool => new HistoryToolResult(
+                    tool.Id,
+                    tool.Name,
+                    tool.Status,
+                    tool.Summary,
+                    tool.RawOutput ?? string.Empty))
+                .ToList());
+
+        var historyRun = new HistoryRunViewModel(entry);
+        HistoryRuns.Insert(0, historyRun);
+        SelectedHistoryRun = historyRun;
+        SaveHistoryCollection();
+    }
+
+    private void UpdateMostRecentHistoryPdf(string reportPath)
+    {
+        var mostRecent = HistoryRuns.FirstOrDefault();
+        if (mostRecent is null)
+        {
+            return;
+        }
+
+        mostRecent.UpdatePdfPath(reportPath);
+        SaveHistoryCollection();
+    }
+
+    private void SaveHistoryCollection()
+    {
+        while (HistoryRuns.Count > 200)
+        {
+            HistoryRuns.RemoveAt(HistoryRuns.Count - 1);
+        }
+
+        _historyStore.Save(HistoryRuns.Select(run => run.Entry));
+    }
+
+    private void ImportConfig()
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Import NarsilNexus Configuration",
+            Filter = "NarsilNexus config (*.json)|*.json|All files (*.*)|*.*",
+            CheckFileExists = true
+        };
+
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+
+        try
+        {
+            var json = File.ReadAllText(dialog.FileName);
+            var package = JsonSerializer.Deserialize<ConfigurationPackage>(json);
+            if (package is null)
+            {
+                SetAllSelected(DiagnosticStatus.Fail, "Configuration file could not be read.");
+                return;
+            }
+
+            SavedTargets.Clear();
+            foreach (var target in package.SavedTargets.Where(target => string.IsNullOrWhiteSpace(target.Target) is false))
+            {
+                SavedTargets.Add(target);
+            }
+
+            SavedSpeedEndpoints.Clear();
+            foreach (var endpoint in package.SavedSpeedEndpoints.Where(endpoint => string.IsNullOrWhiteSpace(endpoint.Url) is false))
+            {
+                SavedSpeedEndpoints.Add(endpoint);
+            }
+
+            _savedTargetStore.Save(SavedTargets);
+            _savedEndpointStore.Save(SavedSpeedEndpoints);
+            SetAllSelected(DiagnosticStatus.Pass, $"Imported configuration from {Path.GetFileName(dialog.FileName)}.");
+        }
+        catch (Exception ex)
+        {
+            SetAllSelected(DiagnosticStatus.Fail, $"Import failed: {ex.Message}");
+        }
+    }
+
+    private void ExportConfig()
+    {
+        var dialog = new SaveFileDialog
+        {
+            Title = "Export NarsilNexus Configuration",
+            Filter = "NarsilNexus config (*.json)|*.json|All files (*.*)|*.*",
+            FileName = $"NarsilNexus-config-{DateTime.Now:yyyyMMdd-HHmm}.json"
+        };
+
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+
+        try
+        {
+            var package = new ConfigurationPackage(
+                DateTimeOffset.Now,
+                SavedTargets.ToList(),
+                SavedSpeedEndpoints.ToList());
+            var json = JsonSerializer.Serialize(package, new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(dialog.FileName, json);
+            SetAllSelected(DiagnosticStatus.Pass, $"Exported configuration to {Path.GetFileName(dialog.FileName)}.");
+        }
+        catch (Exception ex)
+        {
+            SetAllSelected(DiagnosticStatus.Fail, $"Export failed: {ex.Message}");
         }
     }
 
@@ -981,7 +1507,65 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         return builder.ToString();
     }
 
-    private void ApplyLibreSpeedBaseUrl(string baseUrl)
+    private string? ValidateSpeedEndpointForRun()
+    {
+        if (string.IsNullOrWhiteSpace(SpeedResultsApiUrl))
+        {
+            return "Enter a Speed URL before running Speed Results.";
+        }
+
+        if (Uri.TryCreate(SpeedResultsApiUrl.Trim(), UriKind.Absolute, out var baseUri) is false ||
+            IsHttpUri(baseUri) is false)
+        {
+            return "Speed URL must be a valid HTTP or HTTPS URL.";
+        }
+
+        if (SpeedEndpointType.Equals("LibreSpeed", StringComparison.OrdinalIgnoreCase))
+        {
+            if (baseUri.AbsolutePath.EndsWith("/speedtest", StringComparison.OrdinalIgnoreCase))
+            {
+                return "LibreSpeed URL should point to the backend folder, usually ending in /backend.";
+            }
+
+            return null;
+        }
+
+        if (SpeedEndpointType.Equals("HTTP Probe", StringComparison.OrdinalIgnoreCase))
+        {
+            var pingUrl = string.IsNullOrWhiteSpace(SpeedProbePingUrl) ? SpeedResultsApiUrl : SpeedProbePingUrl;
+            var downloadUrl = string.IsNullOrWhiteSpace(SpeedProbeDownloadUrl) ? SpeedResultsApiUrl : SpeedProbeDownloadUrl;
+            if (IsValidHttpUrl(pingUrl) is false)
+            {
+                return "HTTP Probe ping URL must be a valid HTTP or HTTPS URL.";
+            }
+
+            if (IsValidHttpUrl(downloadUrl) is false)
+            {
+                return "HTTP Probe download URL must be a valid HTTP or HTTPS URL.";
+            }
+
+            if (string.IsNullOrWhiteSpace(SpeedProbeUploadUrl) is false &&
+                IsValidHttpUrl(SpeedProbeUploadUrl) is false)
+            {
+                return "HTTP Probe upload URL must be a valid HTTP or HTTPS URL.";
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsValidHttpUrl(string value)
+    {
+        return Uri.TryCreate(value.Trim(), UriKind.Absolute, out var uri) && IsHttpUri(uri);
+    }
+
+    private static bool IsHttpUri(Uri uri)
+    {
+        return uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
+            uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void ApplyLibreSpeedBaseUrl(string baseUrl, bool overwriteExisting = true)
     {
         if (Uri.TryCreate(baseUrl.Trim(), UriKind.Absolute, out var uri) is false)
         {
@@ -989,9 +1573,20 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
 
         var baseText = uri.ToString().TrimEnd('/') + "/";
-        SpeedProbePingUrl = new Uri(new Uri(baseText), "empty.php").ToString();
-        SpeedProbeDownloadUrl = new Uri(new Uri(baseText), "garbage.php?ckSize=100").ToString();
-        SpeedProbeUploadUrl = new Uri(new Uri(baseText), "empty.php").ToString();
+        if (overwriteExisting || string.IsNullOrWhiteSpace(SpeedProbePingUrl))
+        {
+            SpeedProbePingUrl = new Uri(new Uri(baseText), "empty.php").ToString();
+        }
+
+        if (overwriteExisting || string.IsNullOrWhiteSpace(SpeedProbeDownloadUrl))
+        {
+            SpeedProbeDownloadUrl = new Uri(new Uri(baseText), "garbage.php?ckSize=100").ToString();
+        }
+
+        if (overwriteExisting || string.IsNullOrWhiteSpace(SpeedProbeUploadUrl))
+        {
+            SpeedProbeUploadUrl = new Uri(new Uri(baseText), "empty.php").ToString();
+        }
     }
 
     private static async Task<SpeedMeasurement> RunTimedDownloadAsync(Uri uri, TimeSpan duration, CancellationToken cancellationToken)
@@ -1103,6 +1698,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     private sealed record ProcessResult(int ExitCode, string Output);
 
+    private sealed record ConfigurationPackage(
+        DateTimeOffset ExportedAt,
+        IReadOnlyList<SavedTargetOption> SavedTargets,
+        IReadOnlyList<SavedEndpointOption> SavedSpeedEndpoints);
+
     private void OpenAppDataFolder()
     {
         _paths.EnsureCreated();
@@ -1115,22 +1715,32 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     private void ToggleTheme()
     {
-        _isDarkMode = !_isDarkMode;
+        IsDarkMode = !IsDarkMode;
+    }
+
+    private void ApplyTheme()
+    {
         var themePath = _isDarkMode ? "Resources/Themes/Dark.xaml" : "Resources/Themes/Light.xaml";
         Application.Current.Resources.MergedDictionaries.Clear();
         Application.Current.Resources.MergedDictionaries.Add(new ResourceDictionary
         {
             Source = new Uri(themePath, UriKind.Relative)
         });
-        OnPropertyChanged(nameof(ThemeButtonText));
     }
 
     private void SetAllSelected(DiagnosticStatus status, string summary)
     {
+        var changed = false;
         foreach (var tool in Tools.Where(tool => tool.IsSelected))
         {
             tool.Status = status;
             tool.Summary = summary;
+            changed = true;
+        }
+
+        if (changed is false)
+        {
+            SetToolStatus(DiagnosticToolId.SpeedTestResults, status, summary);
         }
     }
 
